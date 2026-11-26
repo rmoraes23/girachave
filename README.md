@@ -1,96 +1,120 @@
 # Girachave
 
-**Rotação de credenciais do Entra ID, no piloto automático.**
-**Entra ID credential rotation, on autopilot.**
+**Segurança de identidades não nominais no Microsoft Entra ID — diagnóstico, rotação e evidência de auditoria.**
 
-🔗 [rmoraes23.github.io/girachave](https://rmoraes23.github.io/girachave/)
+🔗 Site: [rmoraes23.github.io/girachave](https://rmoraes23.github.io/girachave/) ·
+📄 [Relatório de exemplo](https://rmoraes23.github.io/girachave/exemplo/relatorio.html)
 
----
+Contas de serviço, contas genéricas/compartilhadas, acessos de fornecedores e **identidades não-humanas** (apps OAuth e service principals) ficam fora do fluxo passwordless, raramente são revisadas e são o primeiro alvo de atacantes — e a primeira coisa que o auditor pede.
 
-## 🇧🇷 Português
-
-### O que é
-
-Girachave é uma landing page de validação para um micro SaaS de segurança focado em **Microsoft Entra ID**. A proposta: descobrir, rotacionar e documentar contas genéricas, contas de serviço e credenciais compartilhadas que ficam fora do fluxo passwordless (Windows Hello, FIDO2) — e que costumam ser o ponto cego em auditorias de segurança (SOX, ISO 27001).
-
-### Problema
-
-- Contas de serviço e credenciais compartilhadas não entram no fluxo passwordless do Entra ID e ficam com senha estática.
-- Acessos de fornecedores via VPN raramente têm ciclo formal de revisão.
-- Provar rotação e revisão de acesso numa auditoria vira trabalho manual de última hora.
-
-### Status do projeto
-
-🚧 **Fase de validação.** Este repositório contém apenas a landing page, usada para:
-- Testar a proposta de valor com profissionais de TI/segurança
-- Capturar e-mails de lista de espera (via Google Sheets)
-- Apoiar entrevistas de descoberta de cliente
-
-Nenhum produto foi desenvolvido ainda.
-
-### Stack
-
-- HTML/CSS/JS puro (sem build step) — arquivo único, `index.html`
-- Captura de e-mail via [Google Apps Script](https://developers.google.com/apps-script) conectado a uma planilha do Google Sheets
-- Publicado com GitHub Pages
-
-### Estrutura
-
-```
-girachave/
-├── index.html    → landing page completa (hero, problema, como funciona, preço, waitlist)
-└── README.md     → este arquivo
-```
-
-### Como rodar localmente
-
-Não há dependências — basta abrir o `index.html` no navegador. Para testar o envio de e-mails, é necessário ter um endpoint do Apps Script configurado e referenciado na constante `WAITLIST_ENDPOINT` dentro do arquivo.
-
-### Autor
-
-Desenvolvido por um especialista em Cibersegurança, GRC e IAM, com experiência prévia em auditoria fiscal — unindo a visão de compliance/controles com execução técnica em automação (Python, PowerShell, Power Automate, Microsoft Graph API).
+O Girachave descobre essas identidades, aponta os riscos com o controle de conformidade correspondente, rotaciona senhas direto para o cofre e gera evidência à prova de adulteração.
 
 ---
 
-## 🇬🇧 English
+## O que ele faz
 
-### What it is
+| Área | Recursos |
+|---|---|
+| **Descoberta** | Classifica automaticamente contas de serviço, genéricas, de terceiros e convidados B2B |
+| **Contas não nominais** | Idade de senha, senha que nunca expira, sem MFA, dormentes, nunca usadas, sem responsável, papel de admin |
+| **Identidades não-humanas (NHI)** | Apps com permissões críticas (`Directory.ReadWrite.All`, `RoleManagement.*`…), apps de terceiros lendo e-mail/arquivos, segredos expirados, vencendo ou longos demais, apps sem certificado, apps privilegiados sem dono |
+| **Acesso Condicional** | Autenticação legada liberada, admins sem MFA, MFA não universal, políticas só em modo relatório, admins sem MFA resistente a phishing (FIDO2/passkey) |
+| **Rotação segura** | CSPRNG, 32 caracteres, entrega direta no Azure Key Vault, dry-run por padrão, confirmação explícita |
+| **Evidência** | Log encadeado por hash (SHA-256/HMAC), pacote ZIP com manifesto SHA-256, relatório HTML executivo + técnico, plano de ação 30/60/90 |
+| **Monitoramento contínuo** | Drift entre varreduras (novos × resolvidos), alertas no Microsoft Teams, eventos JSONL para Sentinel/Splunk/Elastic/Wazuh, código de saída para pipelines |
+| **Conformidade** | Cada achado mapeado para ISO 27001:2022, CIS v8, NIST CSF 2.0, PCI DSS 4.0, LGPD, CMN/BACEN 4.893 e SOX ITGC |
 
-Girachave is a validation landing page for a security-focused micro SaaS built around **Microsoft Entra ID**. The pitch: discover, rotate, and document generic accounts, service accounts, and shared credentials that fall outside the passwordless flow (Windows Hello, FIDO2) — and that are typically the blind spot in security audits (SOX, ISO 27001).
+Lista completa: `girachave checks` (19 verificações).
 
-### Problem
+## Demonstração em 30 segundos (sem tenant)
 
-- Service accounts and shared credentials don't fit into Entra ID's passwordless flow, so they're stuck with static passwords.
-- Vendor VPN access rarely has a formal review cycle.
-- Proving rotation and access review during an audit turns into last-minute manual work.
+Requer Python 3.10+. **Sem dependências externas.**
 
-### Project status
+```powershell
+git clone https://github.com/rmoraes23/girachave
+cd girachave
+python -m girachave scan --demo --evidence
+```
 
-🚧 **Validation phase.** This repository currently contains only the landing page, used to:
-- Test the value proposition with IT/security professionals
-- Capture waitlist emails (via Google Sheets)
-- Support customer discovery interviews
+Abra `girachave-saida/relatorio.html`. Para simular a rotação:
 
-No product has been built yet.
+```powershell
+python -m girachave rotate --demo
+python -m girachave verify-log
+```
 
-### Stack
+## Uso em um tenant real
 
-- Plain HTML/CSS/JS (no build step) — single `index.html` file
-- Email capture via a [Google Apps Script](https://developers.google.com/apps-script) endpoint writing to a Google Sheet
-- Deployed with GitHub Pages
+### 1. App registration (somente leitura)
 
-### Structure
+No Entra ID, crie um *App registration* e conceda **permissões de aplicação** do Microsoft Graph (com consentimento de admin):
+
+| Permissão | Para quê |
+|---|---|
+| `User.Read.All` | inventário de contas |
+| `Directory.Read.All` | papéis de diretório e responsáveis |
+| `AuditLog.Read.All` | último login (requer Entra ID P1) |
+| `UserAuthenticationMethod.Read.All` | métodos de MFA registrados |
+| `Application.Read.All` | segredos, certificados e permissões de apps |
+| `Policy.Read.All` | políticas de Acesso Condicional |
+
+Só para rotação (opcional): `User-PasswordProfile.ReadWrite.All` + papel *Key Vault Secrets Officer* no cofre.
+
+> Sem P1, o Girachave segue funcionando e avisa quais verificações foram puladas.
+
+### 2. Credenciais por variável de ambiente
+
+Nunca passe segredos como argumento de linha de comando.
+
+```powershell
+$env:GIRACHAVE_TENANT_ID = "<tenant-id>"
+$env:GIRACHAVE_CLIENT_ID = "<client-id>"
+$env:GIRACHAVE_CLIENT_SECRET = "<segredo>"
+$env:GIRACHAVE_LOG_KEY = "<chave longa e aleatória>"   # opcional: log com HMAC
+```
+
+### 3. Comandos
+
+```powershell
+python -m girachave scan --evidence                      # diagnóstico + pacote de evidências
+python -m girachave scan --teams                         # + alerta no Teams (GIRACHAVE_TEAMS_WEBHOOK)
+python -m girachave scan --fail-on critica               # sai com código 2 se houver risco crítico
+python -m girachave rotate                               # plano de rotação (dry-run)
+python -m girachave rotate --apply --vault-url https://meu-cofre.vault.azure.net
+python -m girachave verify-log                           # confere a integridade do log
+```
+
+Saídas em `girachave-saida/`: `relatorio.html`, `findings.json`, `findings.csv`, `inventario.csv`, `siem.jsonl`, `drift.json` e `evidencias-*.zip`.
+
+Para monitoramento contínuo, agende `scan --teams` no Agendador de Tarefas, Azure Automation ou GitHub Actions — cada execução é comparada com a anterior.
+
+## Segurança da própria ferramenta
+
+Menor privilégio, segredos só em memória, allowlist de hosts (anti-SSRF), CSV injection neutralizada, relatório com CSP e sem JavaScript, log imutável e zero dependências de terceiros. Detalhes em [SECURITY.md](SECURITY.md).
+
+## Estrutura
 
 ```
 girachave/
-├── index.html    → full landing page (hero, problem, how it works, pricing, waitlist)
-└── README.md     → this file
+├── index.html, assets/       → landing page (autodiagnóstico, captação de leads)
+├── exemplo/relatorio.html    → relatório gerado em modo demo (para prospecção)
+├── girachave/                → ferramenta Python
+│   ├── cli.py                → comandos scan / rotate / verify-log / checks
+│   ├── collector.py, graph.py→ coleta somente leitura via Microsoft Graph
+│   ├── classifier.py         → classificação de contas
+│   ├── checks.py             → 19 verificações + mapeamento de controles
+│   ├── scoring.py, report.py → score de exposição e relatório HTML
+│   ├── rotation.py           → rotação segura + Azure Key Vault
+│   ├── auditlog.py           → log encadeado por hash
+│   ├── exports.py, notify.py → CSV/JSON, SIEM, evidências, drift, Teams
+│   └── demo.py               → tenant fictício para demonstrações
+└── tests/                    → 31 testes (python -m unittest discover -s tests)
 ```
 
-### Running locally
+## Landing page
 
-No dependencies — just open `index.html` in a browser. To test email submission, you'll need your own Apps Script endpoint configured and referenced in the `WAITLIST_ENDPOINT` constant inside the file.
+HTML/CSS/JS sem build, publicada no GitHub Pages. Inclui autodiagnóstico interativo de 8 perguntas (respostas ficam no navegador), formulário com honeypot anti-bot e consentimento LGPD, e CSP restritiva. O e-mail é enviado a um Google Apps Script (`WAITLIST_ENDPOINT` em `assets/site.js`) que grava numa planilha; os campos `empresa`, `score` e `origem` também são enviados — atualize o script para gravá-los, se quiser.
 
-### Author
+## Autor
 
-Built by a Cybersecurity, GRC & IAM specialist with a background in tax/fiscal auditing — combining a compliance and controls mindset with hands-on automation (Python, PowerShell, Power Automate, Microsoft Graph API).
+Especialista em Cibersegurança, GRC e IAM, com 10 anos de experiência no setor fiscal — unindo a visão de compliance e controles com automação (Python, PowerShell, Power Automate, Microsoft Graph API).

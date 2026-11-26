@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+# saídas da ferramenta podem conter dados do tenant do cliente
+girachave-saida/
+girachave-audit.jsonl
+evidencias-*.zip
+.env
+.claude/
