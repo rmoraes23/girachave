@@ -10,3 +10,6 @@ girachave-audit.jsonl
 evidencias-*.zip
 .env
 .claude/
+# prospecção: contém dados de empresas avaliadas
+prospeccao/
+leads.csv

@@ -174,6 +174,73 @@ def cmd_verify(args) -> int:
     return 1
 
 
+def cmd_leads(args) -> int:
+    from .leads import search_places, write_csv
+
+    _banner()
+    leads = search_places(args.busca, args.max)
+    write_csv(leads, args.out)
+    print(f"\n  {len(leads)} empresa(s) com site próprio encontradas para “{args.busca}”.")
+    for l in leads[:15]:
+        print(f"  • {l.empresa}  {_color('90', l.dominio)}")
+    print(f"\n  Lista salva em {args.out}. Próximo passo: girachave prospect --csv {args.out}\n")
+    return 0
+
+
+def cmd_prospect(args) -> int:
+    import time
+
+    from .leads import Lead, read_csv, search_places, write_csv
+    from .prospect import ProspectError, assess, normalize_domain
+    from .prospect_report import email_draft, render_company, render_index
+
+    _banner()
+    leads: list[Lead] = []
+    if args.csv:
+        leads += read_csv(args.csv)
+    for d in args.domain or []:
+        try:
+            leads.append(Lead(d, d, normalize_domain(d)))
+        except ProspectError as e:
+            print(_color("33", f"  ! {e}"))
+    if args.busca:
+        found = search_places(args.busca, args.max)
+        leads += found
+    if not leads:
+        print("  Informe --domain, --csv ou --busca.")
+        return 1
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    if args.busca:
+        write_csv(leads, out / "leads.csv")
+
+    print(_color("90", "\n  Avaliação PASSIVA: só DNS público, descoberta de login Microsoft e uma visita à home.\n"))
+    results = []
+    for i, lead in enumerate(leads, 1):
+        r = assess(lead.dominio, lead.empresa)
+        if args.only_m365 and not r.uses_m365:
+            print(f"  [{i}/{len(leads)}] {r.domain:<32} {_color('90', 'não usa Microsoft 365 — ignorado')}")
+            continue
+        results.append(r)
+        folder = out / r.domain
+        folder.mkdir(exist_ok=True)
+        (folder / "relatorio.html").write_text(render_company(r, args.contact, args.sender), encoding="utf-8")
+        (folder / "email.txt").write_text(email_draft(r, args.sender, args.contact), encoding="utf-8")
+        tag = _color("36", " M365") if r.uses_m365 else ""
+        sev = " ".join(_color(SEV_ANSI[f.severity.value], f.check_id) for f in r.findings) or _color("32", "ok")
+        print(f"  [{i}/{len(leads)}] {r.domain:<32} prioridade {r.opportunity:>3}{tag}  {sev}")
+        if i < len(leads):
+            time.sleep(args.delay)  # ritmo educado com DNS e sites
+
+    (out / "index.html").write_text(render_index(results, args.busca or ""), encoding="utf-8")
+    AuditLog(args.log).append("prospect.completed", {"domains": [r.domain for r in results],
+                                                     "query": args.busca or ""})
+    print(f"\n  Painel: {_color('1', str(out / 'index.html'))}")
+    print(_color("90", "  Revise cada relatório e e-mail antes de enviar. Nada foi enviado automaticamente.\n"))
+    return 0
+
+
 def cmd_checks(_args) -> int:
     for cid, meta in CATALOG.items():
         print(f"{_color('33', cid)}  {meta['title']}")
@@ -215,6 +282,25 @@ def build_parser() -> argparse.ArgumentParser:
     v = sub.add_parser("verify-log", help="verifica a integridade do log de auditoria")
     v.add_argument("--log", default=DEFAULT_LOG)
     v.set_defaults(func=cmd_verify)
+
+    le = sub.add_parser("leads", help="busca empresas pela API oficial do Google Places (GOOGLE_PLACES_API_KEY)")
+    le.add_argument("busca", help='ex.: "escritório de contabilidade em Campinas"')
+    le.add_argument("--max", type=int, default=20)
+    le.add_argument("--out", default="leads.csv")
+    le.set_defaults(func=cmd_leads)
+
+    pr = sub.add_parser("prospect", help="avaliação externa passiva de domínios + relatório e e-mail por empresa")
+    pr.add_argument("--domain", action="append", metavar="DOMINIO", help="pode repetir")
+    pr.add_argument("--csv", help="lista com colunas empresa;site")
+    pr.add_argument("--busca", help="busca no Google Places antes de avaliar")
+    pr.add_argument("--max", type=int, default=20)
+    pr.add_argument("--only-m365", action="store_true", help="mantém só quem usa Microsoft 365")
+    pr.add_argument("--out", default="prospeccao")
+    pr.add_argument("--contact", default="", help="contato exibido no relatório e no e-mail")
+    pr.add_argument("--sender", default="", help="assinatura (nome · cargo · telefone)")
+    pr.add_argument("--delay", type=float, default=1.0, help="pausa entre domínios, em segundos")
+    pr.add_argument("--log", default=DEFAULT_LOG)
+    pr.set_defaults(func=cmd_prospect)
 
     c = sub.add_parser("checks", help="lista as verificações e controles mapeados")
     c.set_defaults(func=cmd_checks)

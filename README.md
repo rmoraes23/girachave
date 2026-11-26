@@ -88,6 +88,37 @@ Saídas em `girachave-saida/`: `relatorio.html`, `findings.json`, `findings.csv`
 
 Para monitoramento contínuo, agende `scan --teams` no Agendador de Tarefas, Azure Automation ou GitHub Actions — cada execução é comparada com a anterior.
 
+## Prospecção: avaliação externa passiva
+
+Gera, para cada empresa, um relatório curto de segurança + rascunho de e-mail de abordagem, usando **somente informações públicas**:
+
+| Verificação | Como |
+|---|---|
+| Usa Microsoft 365 / Entra ID? Gerenciado ou federado? | MX + endpoint público de descoberta de login da Microsoft |
+| Proteção contra e-mail falso (SPF, DMARC, DKIM) | DNS público (DNS-over-HTTPS) |
+| HTTPS, validade do certificado, redirecionamento, HSTS e cabeçalhos | uma visita à página inicial |
+
+Não há varredura de portas, força bruta, enumeração de usuários ou tentativa de acesso. O diagnóstico interno completo só é feito **com autorização** do cliente.
+
+```powershell
+# 1) lista de empresas — pela API oficial do Google Places (não raspe o Google Maps: viola os termos)
+$env:GOOGLE_PLACES_API_KEY = "<sua chave>"
+python -m girachave leads "escritório de contabilidade em Campinas" --max 30
+
+# ...ou monte um CSV próprio com as colunas empresa;site
+
+# 2) avaliação + relatório + e-mail por empresa
+python -m girachave prospect --csv leads.csv --only-m365 --sender "Seu Nome · Girachave · (11) 9xxxx-xxxx" --contact "rmoraes23.github.io/girachave"
+
+# ou direto, sem CSV
+python -m girachave prospect --busca "clínicas odontológicas em Curitiba" --max 20
+python -m girachave prospect --domain empresa.com.br
+```
+
+Saída em `prospeccao/`: `index.html` (painel ordenado por prioridade comercial) e uma pasta por domínio com `relatorio.html` e `email.txt`. **Nada é enviado automaticamente** — revise antes de mandar.
+
+Boas práticas (LGPD e reputação): envie só a contatos corporativos, de forma individual e não em massa; mantenha a opção de descadastro (já incluída no texto); não afirme nada além do que o relatório mostra.
+
 ## Segurança da própria ferramenta
 
 Menor privilégio, segredos só em memória, allowlist de hosts (anti-SSRF), CSV injection neutralizada, relatório com CSP e sem JavaScript, log imutável e zero dependências de terceiros. Detalhes em [SECURITY.md](SECURITY.md).
@@ -107,8 +138,11 @@ girachave/
 │   ├── rotation.py           → rotação segura + Azure Key Vault
 │   ├── auditlog.py           → log encadeado por hash
 │   ├── exports.py, notify.py → CSV/JSON, SIEM, evidências, drift, Teams
-│   └── demo.py               → tenant fictício para demonstrações
-└── tests/                    → 31 testes (python -m unittest discover -s tests)
+│   ├── demo.py               → tenant fictício para demonstrações
+│   ├── prospect.py           → avaliação externa passiva (DNS, M365, site)
+│   ├── prospect_report.py    → relatório por empresa, painel e e-mail
+│   └── leads.py              → busca via Google Places API / CSV
+└── tests/                    → 44 testes (python -m unittest discover -s tests)
 ```
 
 ## Landing page
